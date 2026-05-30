@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EpiGraph Command Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex flex-col md:flex-row">
+
+    <div id="toast-container" class="fixed top-5 right-5 z-[100] flex flex-col space-y-2"></div>
+
+    <aside class="w-full md:w-64 bg-slate-950 border-r border-slate-800 p-6 flex flex-col justify-between">
+        <div>
+            <div class="mb-10">
+                <span class="text-xs uppercase tracking-widest font-semibold text-indigo-400">System Engine</span>
+                <h1 class="text-2xl font-black text-white tracking-tight">EpiGraph</h1>
+            </div>
+            <nav class="space-y-2">
+                <button onclick="switchTab('dashboard')" class="w-full flex items-center space-x-3 px-4 py-3 rounded-lg bg-indigo-600 font-medium transition text-left">
+                    <span>Operations Map</span>
+                </button>
+                <button onclick="openModal('personModal')" class="w-full flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-left">
+                    <span>+ Register Profile</span>
+                </button>
+                <button onclick="openModal('locationModal')" class="w-full flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-left">
+                    <span>+ Register Location</span>
+                </button>
+                <button onclick="openModal('contactModal')" class="w-full flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-left">
+                    <span>+ Link Contact Vector</span>
+                </button>
+                <button onclick="openModal('visitModal')" class="w-full flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition text-left">
+                    <span>+ Link Location Visit</span>
+                </button>
+            </nav>
+        </div>
+        <div class="pt-6 border-t border-slate-800 space-y-3">
+            <button onclick="executeLifecyclePurge()" class="w-full text-center text-xs bg-rose-600 hover:bg-rose-700 font-bold uppercase tracking-wider py-2 rounded transition shadow-lg">
+                Purge Stale Data (TTL)
+            </button>
+            <button onclick="exportSystemData()" class="w-full text-center text-xs bg-emerald-600 hover:bg-emerald-700 font-bold uppercase tracking-wider py-2 rounded transition">
+                Export System Backup
+            </button>
+        </div>
+    </aside>
+
+    <main class="flex-1 p-6 md:p-8 flex flex-col space-y-6 overflow-y-auto">
+        <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+                <h2 class="text-2xl font-bold text-white">Spatial-Temporal Analysis Center</h2>
+                <p class="text-sm text-slate-400">N-Degree variable exposure query path mapping.</p>
+            </div>
+            <div class="w-full sm:w-auto flex gap-2">
+                <input type="text" id="traceSearchInput" placeholder="Enter target profile..." class="bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2 focus:outline-none focus:border-indigo-500 w-full sm:w-64">
+                <button onclick="executeRiskTrace()" class="bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg font-medium transition">Analyze</button>
+            </div>
+        </header>
+
+        <section class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-5">
+                <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Evaluated Vertices</div>
+                <div id="kpi-nodes" class="text-3xl font-extrabold text-white mt-1">0</div>
+            </div>
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-5">
+                <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Vector Links</div>
+                <div id="kpi-edges" class="text-3xl font-extrabold text-indigo-400 mt-1">0</div>
+            </div>
+            <div class="bg-slate-950 border border-slate-800 rounded-xl p-5">
+                <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Clusters Identified</div>
+                <div id="kpi-clusters" class="text-3xl font-extrabold text-amber-400 mt-1">0</div>
+            </div>
+        </section>
+
+        <section class="flex-1 min-h-[500px] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden relative">
+            <div id="network-visualizer" class="w-full h-full min-h-[500px]"></div>
+            
+            <div id="analysisPanel" class="hidden absolute top-4 right-4 bottom-4 w-80 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-4 flex flex-col overflow-y-auto">
+                <div class="flex justify-between items-center border-b border-slate-700 pb-2 mb-4">
+                    <h3 class="font-bold text-white">Risk Matrix Analysis</h3>
+                    <button onclick="closeAnalysisPanel()" class="text-slate-400 hover:text-white">&times;</button>
+                </div>
+                <div id="analysisContent" class="space-y-4 text-xs"></div>
+            </div>
+        </section>
+    </main>
+
+    <div id="personModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-900 border border-slate-800 p-6 rounded-xl w-full max-w-md space-y-4 shadow-2xl">
+            <h3 class="text-lg font-bold text-white">Register Profile Instance</h3>
+            <form id="personForm" class="space-y-3">
+                <input type="text" id="pName" placeholder="Full Name" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <select id="pStatus" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white">
+                    <option value="Healthy">Healthy / Baseline</option>
+                    <option value="Infected">Confirmed Active Vector</option>
+                    <option value="Quarantined">Isolated / Monitored</option>
+                </select>
+                <input type="text" id="pOfficerId" placeholder="Authorizing Officer ID" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <div class="flex justify-end space-x-2 pt-2">
+                    <button type="button" onclick="closeModal('personModal')" class="px-4 py-2 bg-slate-800 rounded hover:bg-slate-700">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 rounded hover:bg-indigo-700 text-white">Commit Node</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="locationModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-900 border border-slate-800 p-6 rounded-xl w-full max-w-md space-y-4 shadow-2xl">
+            <h3 class="text-lg font-bold text-white">Register Structural Location</h3>
+            <form id="locationForm" class="space-y-3">
+                <input type="text" id="lName" placeholder="Location Entity Name" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <input type="text" id="lType" placeholder="Environmental Classification" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <input type="text" id="lOfficerId" placeholder="Authorizing Officer ID" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <div class="flex justify-end space-x-2 pt-2">
+                    <button type="button" onclick="closeModal('locationModal')" class="px-4 py-2 bg-slate-800 rounded hover:bg-slate-700">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 rounded hover:bg-indigo-700 text-white">Commit Node</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="contactModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-900 border border-slate-800 p-6 rounded-xl w-full max-w-md space-y-4 shadow-2xl">
+            <h3 class="text-lg font-bold text-white">Log Interpersonal Vector</h3>
+            <form id="contactForm" class="space-y-3">
+                <input type="text" id="cPerson1" placeholder="Primary Node Name" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <input type="text" id="cPerson2" placeholder="Secondary Node Name" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <input type="date" id="cDate" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <input type="number" id="cDuration" placeholder="Interaction Window (Minutes)" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <input type="text" id="cOfficerId" placeholder="Authorizing Officer ID" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <div class="flex justify-end space-x-2 pt-2">
+                    <button type="button" onclick="closeModal('contactModal')" class="px-4 py-2 bg-slate-800 rounded hover:bg-slate-700">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 rounded hover:bg-indigo-700 text-white">Commit Edge</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="visitModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-900 border border-slate-800 p-6 rounded-xl w-full max-w-md space-y-4 shadow-2xl">
+            <h3 class="text-lg font-bold text-white">Log Environmental Exposure Vector</h3>
+            <form id="visitForm" class="space-y-3">
+                <input type="text" id="vPerson" placeholder="Profile Node Name" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <input type="text" id="vLocation" placeholder="Location Node Name" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <input type="date" id="vDate" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <input type="text" id="vOfficerId" placeholder="Authorizing Officer ID" class="w-full p-2.5 bg-slate-800 border border-slate-700 rounded text-white" required>
+                <div class="flex justify-end space-x-2 pt-2">
+                    <button type="button" onclick="closeModal('visitModal')" class="px-4 py-2 bg-slate-800 rounded hover:bg-slate-700">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 rounded hover:bg-indigo-700 text-white">Commit Edge</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let networkInstance = null;
+        let engineData = null; // Stored globally for right-click access
+
+        // Quality of Life: Real-time Toast Notifications
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const bgColor = type === 'success' ? 'bg-emerald-600' : type === 'info' ? 'bg-indigo-600' : 'bg-rose-600';
+            toast.className = `p-4 rounded-lg shadow-xl text-white text-sm transform transition-all duration-300 translate-x-full opacity-0 ${bgColor}`;
+            toast.innerText = message;
+            container.appendChild(toast);
+            
+            setTimeout(() => toast.classList.remove('translate-x-full', 'opacity-0'), 10);
+            setTimeout(() => {
+                toast.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function switchTab(tab) { console.log("Active view:", tab); }
+        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        function closeAnalysisPanel() { document.getElementById('analysisPanel').classList.add('hidden'); }
+
+        async function refreshDashboard() {
+            try {
+                const res = await fetch('/api/dashboard');
+                const graphData = await res.json();
+
+                document.getElementById('kpi-nodes').innerText = graphData.nodes.length;
+                document.getElementById('kpi-edges').innerText = graphData.edges.length;
+                const activeInfections = graphData.nodes.filter(n => n.properties && n.properties.status === 'Infected').length;
+                document.getElementById('kpi-clusters').innerText = activeInfections;
+
+                const stylizedNodes = graphData.nodes.map(n => {
+                    let colorConfig = { background: '#1e293b', border: '#475569' };
+                    let shape = 'dot';
+                    if (n.group === 'Person') {
+                        shape = 'face';
+                        if (n.properties.status === 'Infected') colorConfig = { background: '#ef4444', border: '#b91c1c' };
+                        else if (n.properties.status === 'Quarantined') colorConfig = { background: '#f59e0b', border: '#d97706' };
+                        else colorConfig = { background: '#3b82f6', border: '#2563eb' };
+                    } else if (n.group === 'Location') {
+                        shape = 'hexagon';
+                        colorConfig = { background: '#10b981', border: '#047857' };
+                    }
+                    return { ...n, shape: shape, color: colorConfig, font: { color: '#ffffff' } };
+                });
+
+                const visualizationContainer = document.getElementById('network-visualizer');
+                engineData = { nodes: new vis.DataSet(stylizedNodes), edges: new vis.DataSet(graphData.edges) };
+                
+                const configurationOptions = {
+                    physics: { barnesHut: { gravitationalConstant: -3000, centralGravity: 0.3, springLength: 95 } },
+                    edges: { arrows: 'to', font: { color: '#94a3b8', size: 11, strokeWidth: 0 } }
+                };
+
+                networkInstance = new vis.Network(visualizationContainer, engineData, configurationOptions);
+
+                // Quality of Life: Right-Click Node Analysis
+                networkInstance.on("oncontext", function (params) {
+                    params.event.preventDefault(); // Prevents default browser right-click menu
+                    const nodeId = this.getNodeAt(params.pointer.DOM);
+                    if (nodeId) {
+                        const node = engineData.nodes.get(nodeId);
+                        if (node) {
+                            document.getElementById('traceSearchInput').value = node.properties.name;
+                            showToast(`Scanning database for: ${node.properties.name}`, 'info');
+                            executeRiskTrace();
+                        }
+                    }
+                });
+
+            } catch (err) { console.error(err); }
+        }
+
+        // Form Handlers with Toast Callbacks
+        document.getElementById('personForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await fetch('/api/person', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: document.getElementById('pName').value, status: document.getElementById('pStatus').value, loggedBy: document.getElementById('pOfficerId').value }) });
+            closeModal('personModal'); document.getElementById('personForm').reset(); refreshDashboard(); showToast("Profile registered successfully.");
+        });
+
+        document.getElementById('locationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await fetch('/api/location', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: document.getElementById('lName').value, type: document.getElementById('lType').value, loggedBy: document.getElementById('lOfficerId').value }) });
+            closeModal('locationModal'); document.getElementById('locationForm').reset(); refreshDashboard(); showToast("Location deployed successfully.");
+        });
+
+        document.getElementById('contactForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await fetch('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person1: document.getElementById('cPerson1').value, person2: document.getElementById('cPerson2').value, date: document.getElementById('cDate').value, duration: document.getElementById('cDuration').value, officerId: document.getElementById('cOfficerId').value }) });
+            closeModal('contactModal'); document.getElementById('contactForm').reset(); refreshDashboard(); showToast("Contact vector logged.");
+        });
+
+        document.getElementById('visitForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await fetch('/api/visit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person: document.getElementById('vPerson').value, location: document.getElementById('vLocation').value, date: document.getElementById('vDate').value, officerId: document.getElementById('vOfficerId').value }) });
+            closeModal('visitModal'); document.getElementById('visitForm').reset(); refreshDashboard(); showToast("Location visit logged.");
+        });
+
+        // Quality of Life: Enter Key Search Trigger
+        document.getElementById('traceSearchInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                executeRiskTrace();
+            }
+        });
+
+        async function executeLifecyclePurge() {
+            if(confirm("Initiate TTL Lifecycle Protocol? This will permanently delete all vectors older than 21 days.")) {
+                try {
+                    const res = await fetch('/api/lifecycle/purge', { method: 'DELETE' });
+                    const data = await res.json();
+                    showToast(data.message, 'info');
+                    refreshDashboard();
+                } catch(e) { console.error(e); }
+            }
+        }
+
+        async function executeRiskTrace() {
+            const targetName = document.getElementById('traceSearchInput').value.trim();
+            if(!targetName) return;
+            try {
+                const res = await fetch(`/api/trace/${encodeURIComponent(targetName)}`);
+                if(res.status === 404) {
+                    showToast("Target node not found in spatial tracking dataset.", 'error');
+                    return;
+                }
+                const data = await res.json();
+
+                const panel = document.getElementById('analysisPanel');
+                const content = document.getElementById('analysisContent');
+                panel.classList.remove('hidden');
+
+// Dynamic UI Render based on Entity Type
+                if (data.type === 'Person') {
+                    content.innerHTML = `
+                        <div class="bg-slate-950 p-3 rounded border border-slate-800 relative">
+                            <span class="text-[10px] text-indigo-400 font-bold uppercase block">Root Vector Patient</span>
+                            <div class="text-sm font-bold text-white">${data.root.name}</div>
+                            <div class="text-slate-400 mt-1">Status Classification: <span class="text-red-400 font-semibold">${data.root.status}</span></div>
+                            <div class="text-[10px] text-slate-500 mt-2 pt-2 border-t border-slate-800">
+                                Audit Node Logged By: <span class="text-slate-300 font-mono">${data.root.loggedBy || 'SYSTEM'}</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="font-bold text-slate-300 mb-1">Direct Physical Exposure</div>
+                            <ul class="space-y-1 bg-slate-950 p-2 rounded max-h-24 overflow-y-auto">
+                                ${data.directContacts.length ? data.directContacts.map(c => `<li class="text-amber-400">• ${c.name} (${c.status})</li>`).join('') : '<li class="text-slate-500">None</li>'}
+                            </ul>
+                        </div>
+                        <div>
+                            <div class="font-bold text-slate-300 mb-1">Shared Spatial Environments</div>
+                            <ul class="space-y-1 bg-slate-950 p-2 rounded max-h-24 overflow-y-auto">
+                                ${data.environments.length ? data.environments.map(e => `<li class="text-emerald-400">• ${e.name} (${e.type})</li>`).join('') : '<li class="text-slate-500">None</li>'}
+                            </ul>
+                        </div>
+                    `;
+                } else if (data.type === 'Location') {
+                    content.innerHTML = `
+                        <div class="bg-slate-950 p-3 rounded border border-slate-800 relative">
+                            <span class="text-[10px] text-emerald-400 font-bold uppercase block">Structural Target</span>
+                            <div class="text-sm font-bold text-white">${data.root.name}</div>
+                            <div class="text-slate-400 mt-1">Classification: <span class="text-emerald-400 font-semibold">${data.root.type}</span></div>
+                            <div class="text-[10px] text-slate-500 mt-2 pt-2 border-t border-slate-800">
+                                Audit Node Logged By: <span class="text-slate-300 font-mono">${data.root.loggedBy || 'SYSTEM'}</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="font-bold text-slate-300 mb-1">Visitation Logs & Audit Trail</div>
+                            <ul class="space-y-2 bg-slate-950 p-2 rounded max-h-48 overflow-y-auto">
+                                ${data.visitors.length ? data.visitors.map(v => `
+                                    <li class="text-slate-300 border-b border-slate-800 pb-1 last:border-0">
+                                        <span class="${v.status === 'Infected' ? 'text-red-400' : 'text-blue-400'} font-semibold">${v.name}</span> (${v.status})
+                                        <div class="flex justify-between text-[10px] mt-1 text-slate-500">
+                                            <span>Date: ${v.date}</span>
+                                            <span>Officer ID: <span class="font-mono text-slate-400">${v.officer}</span></span>
+                                        </div>
+                                    </li>
+                                `).join('') : '<li class="text-slate-500">No visitation records found.</li>'}
+                            </ul>
+                        </div>
+                    `;
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        function exportSystemData() { window.location.href = '/api/backup'; }
+        refreshDashboard();
+    </script>
+</body>
+</html>
