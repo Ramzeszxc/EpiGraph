@@ -9,47 +9,30 @@ app.use(express.json());
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const driver = neo4j.driver(
-    process.env.NEO4J_URI,
-    neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)
-);
+const driver = neo4j.driver(process.env.NEO4J_URI, neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD));
 
-// Helper for large database IDs
-const getSafeId = (val) => {
-    if (!val) return null;
-    return val.toString ? val.toString() : String(val);
-};
+const getSafeId = (val) => val ? (val.toString ? val.toString() : String(val)) : null;
 
-// --- ENTERPRISE ARCHITECTURE BOOTSTRAP ---
-// Automatically builds Indexes and Constraints on server startup to handle real traffic
 async function initializeDatabaseSchema() {
     const session = driver.session();
     try {
         await session.run('CREATE CONSTRAINT unique_person_name IF NOT EXISTS FOR (p:Person) REQUIRE p.name IS UNIQUE');
         await session.run('CREATE CONSTRAINT unique_location_name IF NOT EXISTS FOR (l:Location) REQUIRE l.name IS UNIQUE');
         await session.run('CREATE INDEX person_status_idx IF NOT EXISTS FOR (p:Person) ON (p.status)');
-        console.log("Enterprise Database Schema Initialized: Constraints & Indexes Active.");
+        console.log("Enterprise Schema Initialized.");
     } catch (error) {
-        console.error("Schema Initialization Warning (May already exist):", error.message);
+        console.error("Schema Init Warning:", error.message);
     } finally {
         await session.close();
     }
 }
 initializeDatabaseSchema();
 
-// --- API ENDPOINTS ---
-
 app.get('/api/dashboard', async (req, res) => {
     const session = driver.session();
     try {
-        const dataResult = await session.run(`
-            MATCH (n)
-            OPTIONAL MATCH (n)-[r]->(m)
-            RETURN n, r, m
-        `);
-
-        const nodes = [];
-        const edges = [];
+        const dataResult = await session.run('MATCH (n) OPTIONAL MATCH (n)-[r]->(m) RETURN n, r, m');
+        const nodes = [], edges = [];
         const seenNodes = new Set();
 
         dataResult.records.forEach(record => {
@@ -63,28 +46,16 @@ app.get('/api/dashboard', async (req, res) => {
                     }
                 }
             });
-
             const r = record.get('r');
             if (r) {
-                edges.push({
-                    id: getSafeId(r.identity),
-                    from: getSafeId(r.start),
-                    to: getSafeId(r.end),
-                    label: r.type,
-                    properties: r.properties
-                });
+                edges.push({ id: getSafeId(r.identity), from: getSafeId(r.start), to: getSafeId(r.end), label: r.type, properties: r.properties });
             }
         });
-
         res.json({ nodes, edges });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    } finally {
-        await session.close();
-    }
+    } catch (error) { res.status(500).json({ error: error.message }); } 
+    finally { await session.close(); }
 });
 
-// Idempotent Person Registration
 app.post('/api/person', async (req, res) => {
     const { name, status, loggedBy } = req.body;
     const session = driver.session();
@@ -96,14 +67,10 @@ app.post('/api/person', async (req, res) => {
             RETURN p
         `, { name, status, loggedBy: loggedBy || 'SYSTEM' });
         res.status(201).json({ success: true, data: result.records[0].get('p').properties });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    } finally {
-        await session.close();
-    }
+    } catch (error) { res.status(500).json({ error: error.message }); } 
+    finally { await session.close(); }
 });
 
-// Idempotent Location Registration
 app.post('/api/location', async (req, res) => {
     const { name, type, loggedBy } = req.body;
     const session = driver.session();
@@ -114,59 +81,42 @@ app.post('/api/location', async (req, res) => {
             RETURN l
         `, { name, type, loggedBy: loggedBy || 'SYSTEM' });
         res.status(201).json({ success: true, data: result.records[0].get('l').properties });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    } finally {
-        await session.close();
-    }
+    } catch (error) { res.status(500).json({ error: error.message }); } 
+    finally { await session.close(); }
 });
 
-// Audited Contact Logging
 app.post('/api/contact', async (req, res) => {
     const { person1, person2, date, duration, officerId } = req.body;
     const session = driver.session();
     try {
         await session.run(`
-            MATCH (a:Person {name: $person1})
-            MATCH (b:Person {name: $person2})
+            MATCH (a:Person {name: $person1}), (b:Person {name: $person2})
             MERGE (a)-[r:CONTACTED {date: $date}]->(b)
             SET r.duration = $duration, r.audit_loggedBy = $officerId, r.audit_timestamp = timestamp()
-            RETURN r
         `, { person1, person2, date, duration, officerId });
         res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    } finally {
-        await session.close();
-    }
+    } catch (error) { res.status(500).json({ error: error.message }); } 
+    finally { await session.close(); }
 });
 
-// Audited Visit Logging
 app.post('/api/visit', async (req, res) => {
     const { person, location, date, officerId } = req.body;
     const session = driver.session();
     try {
         await session.run(`
-            MATCH (p:Person {name: $person})
-            MATCH (l:Location {name: $location})
+            MATCH (p:Person {name: $person}), (l:Location {name: $location})
             MERGE (p)-[r:VISITED {date: $date}]->(l)
             SET r.audit_loggedBy = $officerId, r.audit_timestamp = timestamp()
-            RETURN r
         `, { person, location, date, officerId });
         res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    } finally {
-        await session.close();
-    }
+    } catch (error) { res.status(500).json({ error: error.message }); } 
+    finally { await session.close(); }
 });
 
-// 6. OMNI-SEARCH: TRACE PERSON OR LOCATION
 app.get('/api/trace/:name', async (req, res) => {
     const name = req.params.name;
     const session = driver.session();
     try {
-        // Attempt 1: Search for a Person profile
         let result = await session.run(`
             MATCH (p:Person {name: $name})
             OPTIONAL MATCH (p)-[:CONTACTED]-(direct:Person)
@@ -187,7 +137,6 @@ app.get('/api/trace/:name', async (req, res) => {
             });
         }
 
-// Attempt 2: If no Person is found, search for a Location entity
         result = await session.run(`
             MATCH (l:Location {name: $name})
             OPTIONAL MATCH (p:Person)-[v:VISITED]->(l)
@@ -199,49 +148,79 @@ app.get('/api/trace/:name', async (req, res) => {
             return res.json({
                 type: 'Location',
                 root: record.get('l').properties,
-                visitors: record.get('visitors')
-                    .filter(v => v.person !== null)
-                    .map(v => ({ 
-                        name: v.person.properties.name, 
-                        status: v.person.properties.status, 
-                        date: v.date,
-                        officer: v.officer || 'SYSTEM' 
-                    }))
+                visitors: record.get('visitors').filter(v => v.person !== null).map(v => ({ 
+                    name: v.person.properties.name, status: v.person.properties.status, date: v.date, officer: v.officer || 'SYSTEM' 
+                }))
             });
         }
-
-        // If neither exists
-        res.status(404).json({ error: "Profile or Location not found in the spatial dataset." });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    } finally {
-        await session.close();
-    }
+        res.status(404).json({ error: "Profile or Location not found." });
+    } catch (error) { res.status(500).json({ error: error.message }); } 
+    finally { await session.close(); }
 });
 
-// DATA LIFECYCLE (TTL): Purge structural links older than 21 days
+app.put('/api/person/:name', async (req, res) => {
+    const { status, officerId } = req.body;
+    const session = driver.session();
+    try {
+        await session.run(`
+            MATCH (p:Person {name: $name})
+            SET p.status = $status, p.lastUpdatedAt = timestamp(), p.updatedBy = $officerId
+        `, { name: req.params.name, status, officerId: officerId || 'SYSTEM' });
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ error: error.message }); } 
+    finally { await session.close(); }
+});
+
+app.delete('/api/node/:name', async (req, res) => {
+    const session = driver.session();
+    try {
+        await session.run('MATCH (n {name: $name}) DETACH DELETE n', { name: req.params.name });
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ error: error.message }); } 
+    finally { await session.close(); }
+});
+
 app.delete('/api/lifecycle/purge', async (req, res) => {
     const session = driver.session();
     try {
-        // Calculate the date string for 21 days ago (YYYY-MM-DD format)
         const purgeDate = new Date();
         purgeDate.setDate(purgeDate.getDate() - 21);
         const threshold = purgeDate.toISOString().split('T')[0];
 
         const result = await session.run(`
-            MATCH ()-[r]-()
-            WHERE r.date < $threshold AND (type(r) = 'CONTACTED' OR type(r) = 'VISITED')
-            DELETE r
-            RETURN count(r) as deletedCount
+            MATCH ()-[r]-() WHERE r.date < $threshold AND (type(r) = 'CONTACTED' OR type(r) = 'VISITED')
+            DELETE r RETURN count(r) as deletedCount
         `, { threshold });
+        res.json({ success: true, message: `Purged ${result.records[0].get('deletedCount').toNumber()} stale exposure vectors.` });
+    } catch (error) { res.status(500).json({ error: error.message }); } 
+    finally { await session.close(); }
+});
 
-        const count = result.records[0].get('deletedCount').toNumber();
-        res.json({ success: true, message: `Lifecycle protocol complete. Purged ${count} stale exposure vectors.` });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    } finally {
-        await session.close();
-    }
+app.get('/api/path', async (req, res) => {
+    const { source, target } = req.query;
+    const session = driver.session();
+    try {
+        const validation = await session.run('MATCH (start:Person {name: $source}) RETURN start.status AS status', { source });
+        if (validation.records.length === 0) return res.status(404).json({ error: "Source profile not found." });
+        
+        if (validation.records[0].get('status') === 'Healthy') {
+            return res.status(400).json({ error: "Biological Constraint Error: A 'Healthy' profile cannot originate a viral chain." });
+        }
+
+        const result = await session.run(`
+            MATCH (start:Person {name: $source}), (end:Person {name: $target})
+            MATCH path = shortestPath((start)-[*]-(end))
+            RETURN nodes(path) AS pathNodes, relationships(path) AS pathEdges
+        `, { source, target });
+
+        if (result.records.length === 0) return res.status(404).json({ error: "No transmission path found." });
+
+        res.json({
+            nodes: result.records[0].get('pathNodes').map(n => ({ name: n.properties.name, type: n.labels[0], status: n.properties.status || 'N/A' })),
+            edges: result.records[0].get('pathEdges').map(e => e.type)
+        });
+    } catch (error) { res.status(500).json({ error: error.message }); } 
+    finally { await session.close(); }
 });
 
 app.get('/api/backup', async (req, res) => {
@@ -254,13 +233,10 @@ app.get('/api/backup', async (req, res) => {
             targetNode: rec.get('m') ? { labels: rec.get('m')?.labels, properties: rec.get('m')?.properties } : null
         }));
         res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Content-Disposition', 'attachment; filename=epigraph_production_backup.json');
+        res.setHeader('Content-Disposition', 'attachment; filename=epigraph_backup.json');
         res.send(JSON.stringify(databaseDump, null, 2));
-    } catch (error) {
-        res.status(500).send("Database extraction runtime error.");
-    } finally {
-        await session.close();
-    }
+    } catch (error) { res.status(500).send("Extraction error."); } 
+    finally { await session.close(); }
 });
 
 const PORT = process.env.PORT || 3000;
